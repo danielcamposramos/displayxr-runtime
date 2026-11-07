@@ -1335,6 +1335,25 @@ xrt_display_processor_vk_tolerates_resample(struct xrt_display_processor_vk *xdp
 }
 
 /*!
+ * Is the DP's output, in its current mode, a full side-by-side picture for a
+ * stereo desktop compositor (@ref XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE)?
+ * Every "didn't answer" case — absent slot, NULL, false return — is false: an
+ * ordinary weave, presented and shown exactly as before the flag existed.
+ *
+ * @public @memberof xrt_display_processor_vk
+ */
+static inline bool
+xrt_display_processor_vk_outputs_full_sbs(struct xrt_display_processor_vk *xdp)
+{
+	struct xrt_dp_scanout_caps caps;
+	xrt_dp_scanout_caps_init(&caps);
+	if (!xrt_display_processor_vk_get_scanout_caps(xdp, &caps)) {
+		return false;
+	}
+	return (caps.flags & XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE) != 0;
+}
+
+/*!
  * @copydoc xrt_display_processor_vk::get_background_preview
  *
  * Returns false when the slot is absent (older plug-in `struct_size`), NULL,
