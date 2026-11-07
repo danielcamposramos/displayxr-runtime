@@ -276,6 +276,17 @@ sim_zone_substitute_position_preserving(enum sim_display_output_mode mode, bool 
 		return false;
 	}
 	static bool logged = false;
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+	// No anaglyph is built to substitute: full side by side stays, and the log
+	// says that the zone mask is not position-preserving on it.
+	if (!logged) {
+		logged = true;
+		U_LOG_W("sim_display %s: zone mask active — this build has no position-preserving output to "
+		        "substitute (2D and full side by side only), so output mode %d is drawn as it is (#842)",
+		        variant, (int)mode);
+	}
+	return false;
+#else
 	if (!logged) {
 		logged = true;
 		U_LOG_W("sim_display %s: zone mask active — substituting position-preserving anaglyph "
@@ -283,6 +294,7 @@ sim_zone_substitute_position_preserving(enum sim_display_output_mode mode, bool 
 		        variant, (int)mode);
 	}
 	return true;
+#endif
 }
 
 /*!

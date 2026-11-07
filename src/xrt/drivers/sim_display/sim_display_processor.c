@@ -85,13 +85,15 @@
 
 // SPIR-V shader headers (generated at build time by spirv_shaders())
 #include "sim_display/shaders/fullscreen.vert.h"
+#include "sim_display/shaders/squeezed_sbs.frag.h"
+#include "sim_display/shaders/passthrough.frag.h"
+#ifndef SIM_DISPLAY_FULL_SBS_ONLY
 #include "sim_display/shaders/anaglyph.frag.h"
 #include "sim_display/shaders/blend.frag.h"
 #include "sim_display/shaders/sbs.frag.h"
-#include "sim_display/shaders/squeezed_sbs.frag.h"
 #include "sim_display/shaders/quad.frag.h"
-#include "sim_display/shaders/passthrough.frag.h"
 #include "sim_display/shaders/interlaced.frag.h"
+#endif
 
 
 /*!
@@ -641,6 +643,16 @@ create_pipeline_resources(struct sim_display_processor *sdp, int32_t target_form
 		size_t size;
 		const char *name;
 	} frag_shaders[SIM_DP_PIPELINE_COUNT] = {
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+	    // Only 2D and the full side-by-side kernel are built (XRT_SIM_DISPLAY_FULL_SBS_ONLY).
+	    {NULL, 0, "SBS"},
+	    {NULL, 0, "Anaglyph"},
+	    {NULL, 0, "Blend"},
+	    {sim_display_shaders_squeezed_sbs_frag, sizeof(sim_display_shaders_squeezed_sbs_frag), "Squeezed SBS"},
+	    {NULL, 0, "Quad"},
+	    {sim_display_shaders_passthrough_frag, sizeof(sim_display_shaders_passthrough_frag), "Passthrough"},
+	    {NULL, 0, "Interlaced"},
+#else
 	    {sim_display_shaders_sbs_frag, sizeof(sim_display_shaders_sbs_frag), "SBS"},
 	    {sim_display_shaders_anaglyph_frag, sizeof(sim_display_shaders_anaglyph_frag), "Anaglyph"},
 	    {sim_display_shaders_blend_frag, sizeof(sim_display_shaders_blend_frag), "Blend"},
@@ -648,11 +660,15 @@ create_pipeline_resources(struct sim_display_processor *sdp, int32_t target_form
 	    {sim_display_shaders_quad_frag, sizeof(sim_display_shaders_quad_frag), "Quad"},
 	    {sim_display_shaders_passthrough_frag, sizeof(sim_display_shaders_passthrough_frag), "Passthrough"},
 	    {sim_display_shaders_interlaced_frag, sizeof(sim_display_shaders_interlaced_frag), "Interlaced"},
+#endif
 		};
 
 	// Create all fragment shader modules upfront (keep alive until all pipelines are created)
 	VkShaderModule frag_modules[SIM_DP_PIPELINE_COUNT] = {VK_NULL_HANDLE};
 	for (int i = 0; i < SIM_DP_PIPELINE_COUNT; i++) {
+		if (frag_shaders[i].code == NULL) {
+			continue; // not built: its pipeline stays VK_NULL_HANDLE
+		}
 		ret = create_shader_module(vk, frag_shaders[i].code, frag_shaders[i].size, &frag_modules[i]);
 		if (ret != VK_SUCCESS) {
 			U_LOG_E("sim_display: Failed to create %s fragment shader: %d", frag_shaders[i].name, ret);
@@ -709,10 +725,19 @@ create_pipeline_resources(struct sim_display_processor *sdp, int32_t target_form
 	    .pDynamicStates = dynamic_states,
 	};
 
-	// Build all pipeline create infos with their own stage arrays
+	// Build all pipeline create infos with their own stage arrays, one per
+	// built shader (built[k] is the table index of create info k)
 	VkPipelineShaderStageCreateInfo all_stages[SIM_DP_PIPELINE_COUNT][2];
 	VkGraphicsPipelineCreateInfo pipeline_infos[SIM_DP_PIPELINE_COUNT];
-	for (int i = 0; i < SIM_DP_PIPELINE_COUNT; i++) {
+	VkPipeline created[SIM_DP_PIPELINE_COUNT] = {VK_NULL_HANDLE};
+	int built[SIM_DP_PIPELINE_COUNT];
+	uint32_t built_count = 0;
+	for (int t = 0; t < SIM_DP_PIPELINE_COUNT; t++) {
+		if (frag_modules[t] == VK_NULL_HANDLE) {
+			continue;
+		}
+		const uint32_t i = built_count;
+		built[built_count++] = t;
 		all_stages[i][0] = (VkPipelineShaderStageCreateInfo){
 		    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 		    .stage = VK_SHADER_STAGE_VERTEX_BIT,
@@ -722,7 +747,7 @@ create_pipeline_resources(struct sim_display_processor *sdp, int32_t target_form
 		all_stages[i][1] = (VkPipelineShaderStageCreateInfo){
 		    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 		    .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-		    .module = frag_modules[i],
+		    .module = frag_modules[t],
 		    .pName = "main",
 		};
 		pipeline_infos[i] = (VkGraphicsPipelineCreateInfo){
@@ -743,8 +768,10 @@ create_pipeline_resources(struct sim_display_processor *sdp, int32_t target_form
 	}
 
 	// Create all pipelines in a single batch call
-	ret = vk->vkCreateGraphicsPipelines(vk->device, VK_NULL_HANDLE, SIM_DP_PIPELINE_COUNT, pipeline_infos, NULL,
-	                                    sdp->pipelines);
+	ret = vk->vkCreateGraphicsPipelines(vk->device, VK_NULL_HANDLE, built_count, pipeline_infos, NULL, created);
+	for (uint32_t k = 0; k < built_count; k++) {
+		sdp->pipelines[built[k]] = created[k];
+	}
 
 	// Destroy all shader modules now that pipelines are created
 	for (int i = 0; i < SIM_DP_PIPELINE_COUNT; i++)
@@ -1393,6 +1420,10 @@ sim_display_processor_create_impl(enum sim_display_output_mode mode,
 	// than carrying its own (multi-screen M2).
 	sim_display_set_output_mode(mode);
 
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+	U_LOG_W("Created sim display processor (2D and full side by side only), initial mode: %s",
+	        mode == SIM_DISPLAY_OUTPUT_FULL_SBS ? "Full SBS" : "Passthrough");
+#else
 	U_LOG_W("Created sim display processor (all %d pipelines), initial mode: %s", SIM_DP_PIPELINE_COUNT,
 	        mode == SIM_DISPLAY_OUTPUT_SBS           ? "SBS" :
 	        mode == SIM_DISPLAY_OUTPUT_ANAGLYPH       ? "Anaglyph" :
@@ -1401,6 +1432,7 @@ sim_display_processor_create_impl(enum sim_display_output_mode mode,
 	        mode == SIM_DISPLAY_OUTPUT_INTERLACED      ? "Interlaced" :
 	        mode == SIM_DISPLAY_OUTPUT_FULL_SBS        ? "Full SBS" :
 	        mode == SIM_DISPLAY_OUTPUT_PASSTHROUGH     ? "Passthrough" : "Blend");
+#endif
 
 	if (sdp->screen_bound) {
 		U_LOG_W("sim_display: segment DP %p for screen 0x%016llx — %ux%u px, %.3f x %.3f m, desktop origin (%d, %d)",

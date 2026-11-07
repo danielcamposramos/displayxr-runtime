@@ -58,7 +58,14 @@
 //! rearrangement), so it composites correctly with display-zones and reads as
 //! real depth on a flat panel. The rearranging modes (SBS / Squeezed / Quad)
 //! are deliberately opt-in — they are view-inspection tools, not a sane default.
+//! A build for a stereo desktop compositor (XRT_SIM_DISPLAY_FULL_SBS_ONLY) has
+//! 2D and full side by side only, and full side by side is its default: the
+//! compositor's outputs make every display format from it.
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+static xrt_atomic_s32_t g_sim_display_output_mode = SIM_DISPLAY_OUTPUT_FULL_SBS;
+#else
 static xrt_atomic_s32_t g_sim_display_output_mode = SIM_DISPLAY_OUTPUT_ANAGLYPH;
+#endif
 static xrt_atomic_s32_t g_sim_display_view_count = 1;
 
 //! Panel metrics published for the DP variants (#856). Written once in
@@ -528,6 +535,11 @@ sim_display_hmd_set_property(struct xrt_device *xdev,
 			return XRT_SUCCESS;
 		}
 
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+		// Mode 1 is the one stereo mode of this build: full side by side.
+		sim_display_set_output_mode(SIM_DISPLAY_OUTPUT_FULL_SBS);
+		return XRT_SUCCESS;
+#else
 		enum sim_display_output_mode internal_mode;
 		switch (value) {
 		case 1:
@@ -553,6 +565,7 @@ sim_display_hmd_set_property(struct xrt_device *xdev,
 		}
 		sim_display_set_output_mode(internal_mode);
 		return XRT_SUCCESS;
+#endif
 	}
 	if (property == XRT_DEVICE_PROPERTY_EXT_APP_MODE) {
 		sim_display_hmd_set_ext_app_mode(xdev, value != 0);
@@ -569,6 +582,9 @@ sim_display_hmd_get_property(struct xrt_device *xdev,
 	if (property == XRT_DEVICE_PROPERTY_OUTPUT_MODE) {
 		// Return unified mode index: internal SBS(0)→2, Anaglyph(1)→1, Blend(2)→3
 		enum sim_display_output_mode internal = sim_display_get_output_mode();
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+		*out_value = (internal == SIM_DISPLAY_OUTPUT_FULL_SBS) ? 1 : 0;
+#else
 		switch (internal) {
 		case SIM_DISPLAY_OUTPUT_PASSTHROUGH:   *out_value = 0; break;
 		case SIM_DISPLAY_OUTPUT_SBS:          *out_value = 2; break;
@@ -580,6 +596,7 @@ sim_display_hmd_get_property(struct xrt_device *xdev,
 		case SIM_DISPLAY_OUTPUT_FULL_SBS:     *out_value = 6; break;
 		default:                              *out_value = 0; break;
 		}
+#endif
 		return XRT_SUCCESS;
 	}
 	if (property == XRT_DEVICE_PROPERTY_SBS_MODE) {
@@ -611,6 +628,17 @@ sim_display_hmd_create(void)
 		char mode_buf[32];
 		const char *mode_str = sim_display_setting("OUTPUT", mode_buf, sizeof(mode_buf)) ? mode_buf : NULL;
 		if (mode_str) {
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+			if (strcmp(mode_str, "sbs_full") == 0 || strcmp(mode_str, "full_sbs") == 0)
+				sim_display_set_output_mode(SIM_DISPLAY_OUTPUT_FULL_SBS);
+			else if (strcmp(mode_str, "2d") == 0 || strcmp(mode_str, "passthrough") == 0)
+				sim_display_set_output_mode(SIM_DISPLAY_OUTPUT_PASSTHROUGH);
+			else
+				U_LOG_W("sim_display: SIM_DISPLAY_OUTPUT '%s' is not built here: this build has 2d and "
+				        "sbs_full only, and the desktop compositor makes every display format from full "
+				        "side by side — keeping sbs_full",
+				        mode_str);
+#else
 			if (strcmp(mode_str, "sbs") == 0)
 				sim_display_set_output_mode(SIM_DISPLAY_OUTPUT_SBS);
 			else if (strcmp(mode_str, "anaglyph") == 0)
@@ -633,6 +661,7 @@ sim_display_hmd_create(void)
 				        "2d|anaglyph|sbs|squeezed|quad|blend|interlaced|sbs_full) — keeping the "
 				        "anaglyph default",
 				        mode_str);
+#endif
 		}
 	}
 
@@ -888,6 +917,17 @@ sim_display_hmd_create(void)
 	hmd->base.rendering_modes[6].tile_columns = 2;
 	hmd->base.rendering_modes[6].tile_rows = 1;
 
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+	// One stereo output in this build: Full SBS becomes mode 1, after 2D, and
+	// the other modes are not offered (their pipelines are not built).
+	hmd->base.rendering_modes[1] = hmd->base.rendering_modes[6];
+	hmd->base.rendering_modes[1].mode_index = 1;
+	for (uint32_t m = 2; m < 7; m++) {
+		memset(&hmd->base.rendering_modes[m], 0, sizeof(hmd->base.rendering_modes[m]));
+	}
+	hmd->base.rendering_mode_count = 2;
+#endif
+
 	// Per-mode tracking capability (#441): sim_display has no real eye
 	// tracker, so every mode stays untracked (mode_flags/reserved are
 	// zero from the calloc'd device). Under the dev-only
@@ -916,6 +956,9 @@ sim_display_hmd_create(void)
 		enum sim_display_output_mode sd_mode = sim_display_get_output_mode();
 		// Map internal mode to unified index: Passthrough→0, Anaglyph→1, SBS→2, SqueezedSBS→3, Quad→4
 		uint32_t default_mode;
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+		default_mode = (sd_mode == SIM_DISPLAY_OUTPUT_FULL_SBS) ? 1 : 0;
+#else
 		switch (sd_mode) {
 		case SIM_DISPLAY_OUTPUT_PASSTHROUGH:  default_mode = 0; break;
 		case SIM_DISPLAY_OUTPUT_ANAGLYPH:     default_mode = 1; break;
@@ -926,6 +969,7 @@ sim_display_hmd_create(void)
 		case SIM_DISPLAY_OUTPUT_FULL_SBS:     default_mode = 6; break;
 		default:                              default_mode = 0; break;
 		}
+#endif
 
 		// SIM_DISPLAY_FORCE_MODE overrides the SIM_DISPLAY_OUTPUT-derived
 		// default with an explicit unified index and keeps the DP present
@@ -933,11 +977,16 @@ sim_display_hmd_create(void)
 		// this mode against every later request (plug-in-wide, any app).
 		int32_t forced = (int32_t)debug_get_num_option_sim_display_force_mode();
 		if (forced >= 0 && (uint32_t)forced < hmd->base.rendering_mode_count) {
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+			static const enum sim_display_output_mode idx_to_internal[2] = {
+			    SIM_DISPLAY_OUTPUT_PASSTHROUGH, SIM_DISPLAY_OUTPUT_FULL_SBS};
+#else
 			static const enum sim_display_output_mode idx_to_internal[7] = {
 			    SIM_DISPLAY_OUTPUT_PASSTHROUGH, SIM_DISPLAY_OUTPUT_ANAGLYPH,
 			    SIM_DISPLAY_OUTPUT_SBS,         SIM_DISPLAY_OUTPUT_SQUEEZED_SBS,
 			    SIM_DISPLAY_OUTPUT_QUAD,        SIM_DISPLAY_OUTPUT_INTERLACED,
 			    SIM_DISPLAY_OUTPUT_FULL_SBS};
+#endif
 			default_mode = (uint32_t)forced;
 			sim_display_set_output_mode(idx_to_internal[default_mode]);
 			U_LOG_W("sim_display: SIM_DISPLAY_FORCE_MODE=%d — pinning active mode "
