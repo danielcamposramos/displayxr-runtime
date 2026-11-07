@@ -159,6 +159,31 @@ struct xrt_dp_scanout_caps
 #define XRT_DP_SCANOUT_FLAG_PHASE_FROM_PRESENT_ORIGIN (1u << 1)
 
 /*!
+ * @ref xrt_dp_scanout_caps::flags: THIS instance's output, in its current
+ * mode, is the views placed side by side, view 0 (the left eye) first, each at
+ * the resolution its tile was rendered at, untouched — a picture meant for a
+ * stereo desktop compositor that shows each half to its own eye (the layout
+ * HDMI 1.4b calls 3D structure "Side-by-Side (Full)", value 3). The DP keeps
+ * no knowledge of the screen: the compositor resizes the views once and turns
+ * them into what each output needs (a 3D television's HDMI 3D mode, anaglyph
+ * on a 2D monitor, the left view alone on a plain 2D output).
+ *
+ * When the bit is set and the window system offers a stereo declaration, the
+ * runtime presents a target as wide as the views laid side by side (twice the
+ * window's width for two views) and declares the window as holding them, once;
+ * the window keeps its size on screen. Where no declaration is offered the
+ * target stays the window's size and the runtime says so in its log, so the
+ * window shows the two views side by side, flat.
+ *
+ * Set per INSTANCE and per MODE (re-read when the rendering mode changes, like
+ * @ref XRT_DP_SCANOUT_FLAG_TOLERATES_RESAMPLE). Bit clear (the default, every
+ * plug-in built before the bit) = an ordinary weave the window shows as is.
+ *
+ * @ingroup xrt_iface
+ */
+#define XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE (1u << 2)
+
+/*!
  * Size of the V1 caps shape. Plug-ins accept any caller `struct_size >= ` this
  * and reject only callers older than the slot itself.
  */
