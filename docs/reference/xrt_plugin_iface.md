@@ -423,6 +423,20 @@ as "needs 1:1"). A lenticular weave leaves it clear; the runtime then paints fla
 segment whose screen is resampled, and the #1595 / #1831 session gates degrade as before.
 sim_display sets it for every output but INTERLACED.
 
+**Output for a stereo desktop compositor.** A DP whose output is the views placed side by side,
+view 0 (left eye) first, each at the resolution its tile was rendered at and otherwise untouched,
+says so with `XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE` in the same `flags` word (per instance and
+per mode, like the resample bit; a plug-in built before the bit wrote 0 there, an ordinary weave).
+The Vulkan compositor then presents a target as wide as the views side by side (twice the window
+for two views), hands the DP that whole target as its canvas, and declares the app's native
+Wayland surface to the desktop compositor as full side by side (`kde_stereo_content_v1`, value 3,
+the value of HDMI 1.4b's 3D structure "Side-by-Side (Full)"). A stereo compositor such as Stereo
+KWin shows each view to its eye and turns the pair into what each output needs; the window keeps
+its size on screen. Where no declaration is offered (another compositor, an X11 window today,
+`DXR_STEREO_DECLARE=0`) the target stays the window's size and the runtime logs why in a
+`FULL_SBS:` line, so the two views show side by side, flat. sim_display sets it for
+`SIM_DISPLAY_OUTPUT=sbs_full` (rendering mode 6, view scale 1.0 x 1.0, 2x1 tiles).
+
 ### `create_dp_metal_for_screen` (multi-screen on macOS)
 
 ```c
