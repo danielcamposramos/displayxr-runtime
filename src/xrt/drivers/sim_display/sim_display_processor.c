@@ -349,6 +349,7 @@ sim_dp_process_atlas(struct xrt_display_processor *xdp,
 	if (tile_columns * tile_rows <= 1) {
 		mode = SIM_DISPLAY_OUTPUT_PASSTHROUGH;
 	}
+	mode = sim_display_pipeline_mode(mode);
 	VkPipeline active_pipeline = sdp->pipelines[mode];
 	if (sim_zone_substitute_position_preserving(mode, sdp->zone_active, "VK")) {
 		active_pipeline = sdp->pipelines[SIM_DISPLAY_OUTPUT_ANAGLYPH];
@@ -883,6 +884,9 @@ sim_dp_set_present_origin(struct xrt_display_processor_vk *xdp, int32_t panel_x,
  * default) and, for multi-screen M2's per-segment 1:1 gate, whether the
  * output survives a display-server resample. Every sim output does except
  * INTERLACED, whose 1-pixel period is exactly what a resample destroys.
+ * FULL_SBS also says its output is full side by side for a stereo
+ * compositor (XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE), which the runtime
+ * presents twice the window's width and declares.
  * Read from the CURRENT output mode on every call (the 1/2/3 keys can change
  * it), so the runtime re-queries when it re-evaluates a segment. Logs on
  * change only.
@@ -895,8 +899,12 @@ sim_dp_get_scanout_caps(struct xrt_display_processor_vk *xdp, struct xrt_dp_scan
 		return false;
 	}
 	const enum xrt_dp_weave_scope scope = sim_scanout_scope_from_env();
-	const bool interlaced = sim_display_get_output_mode() == SIM_DISPLAY_OUTPUT_INTERLACED;
-	const uint32_t flags = interlaced ? 0u : XRT_DP_SCANOUT_FLAG_TOLERATES_RESAMPLE;
+	const enum sim_display_output_mode mode = sim_display_get_output_mode();
+	const bool interlaced = mode == SIM_DISPLAY_OUTPUT_INTERLACED;
+	uint32_t flags = interlaced ? 0u : XRT_DP_SCANOUT_FLAG_TOLERATES_RESAMPLE;
+	if (mode == SIM_DISPLAY_OUTPUT_FULL_SBS) {
+		flags |= XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE;
+	}
 	out_caps->weave_scope = (uint32_t)scope;
 	out_caps->flags = flags;
 	for (size_t i = 0; i < sizeof(out_caps->reserved) / sizeof(out_caps->reserved[0]); i++) {
@@ -905,9 +913,12 @@ sim_dp_get_scanout_caps(struct xrt_display_processor_vk *xdp, struct xrt_dp_scan
 	if (!sdp->caps_reported || sdp->caps_last_flags != flags) {
 		sdp->caps_reported = true;
 		sdp->caps_last_flags = flags;
-		U_LOG_I("sim_display VK DP %p: weave scope '%s', %s", (void *)sdp, xrt_dp_weave_scope_name(scope),
+		U_LOG_I("sim_display VK DP %p: weave scope '%s', %s%s", (void *)sdp, xrt_dp_weave_scope_name(scope),
 		        interlaced ? "INTERLACED needs 1:1 pixels (a resample destroys the pattern)"
-		                   : "output survives a display-server resample");
+		                   : "output survives a display-server resample",
+		        (flags & XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE) != 0
+		            ? ", output is full side by side for a stereo compositor"
+		            : "");
 	}
 	return true;
 }
@@ -1388,6 +1399,7 @@ sim_display_processor_create_impl(enum sim_display_output_mode mode,
 	        mode == SIM_DISPLAY_OUTPUT_SQUEEZED_SBS   ? "Squeezed SBS" :
 	        mode == SIM_DISPLAY_OUTPUT_QUAD            ? "Quad" :
 	        mode == SIM_DISPLAY_OUTPUT_INTERLACED      ? "Interlaced" :
+	        mode == SIM_DISPLAY_OUTPUT_FULL_SBS        ? "Full SBS" :
 	        mode == SIM_DISPLAY_OUTPUT_PASSTHROUGH     ? "Passthrough" : "Blend");
 
 	if (sdp->screen_bound) {
