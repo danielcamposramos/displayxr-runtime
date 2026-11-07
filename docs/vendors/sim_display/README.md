@@ -44,7 +44,9 @@ sim_display supports several output modes for visualizing stereo content on a 2D
   (view scale 1.0 x 1.0, 2x1 tiles) and handed over side by side, left first, as
   they are. The DP reports `XRT_DP_SCANOUT_FLAG_FULL_SIDE_BY_SIDE`, so the Vulkan
   compositor presents a buffer twice the window's width and declares the
-  window full side by side (`kde_stereo_content_v1`, value 3); the compositor
+  window full side by side (`kde_stereo_content_v1`, value 3, on a native
+  Wayland surface; `_KDE_NET_WM_STEREO_CONTENT` = 3 on the runtime's own X11
+  window, which the window manager then makes twice as wide); the compositor
   (Stereo KWin) shows each view to its eye and turns the pair into what each
   output needs: a 3D television's HDMI 3D mode, anaglyph on a 2D monitor, the
   left view alone on a plain 2D output. Without such a compositor nothing is

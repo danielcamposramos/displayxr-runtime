@@ -432,10 +432,17 @@ for two views), hands the DP that whole target as its canvas, and declares the a
 Wayland surface to the desktop compositor as full side by side (`kde_stereo_content_v1`, value 3,
 the value of HDMI 1.4b's 3D structure "Side-by-Side (Full)"). A stereo compositor such as Stereo
 KWin shows each view to its eye and turns the pair into what each output needs; the window keeps
-its size on screen. Where no declaration is offered (another compositor, an X11 window today,
-`DXR_STEREO_DECLARE=0`) the target stays the window's size and the runtime logs why in a
-`FULL_SBS:` line, so the two views show side by side, flat. sim_display sets it for
-`SIM_DISPLAY_OUTPUT=sbs_full` (rendering mode 6, view scale 1.0 x 1.0, 2x1 tiles).
+its size on screen. The runtime's own X11 window (a plain OpenXR app's, under X or Xwayland) is
+declared too when the window manager announces version 3 or later of the X11 declaration on the
+root window (`_KDE_NET_WM_STEREO_CONTENT_SUPPORTED`): the runtime sets `_KDE_NET_WM_STEREO_CONTENT`
+= 3 on it, and the window manager keeps the window's place on screen while making the X window
+twice as wide, possibly seconds later. A Vulkan X11 swapchain is always the window's current size,
+so the target becomes two views wide only once the X window is; until then, and after a
+withdrawal, the window is presented at its own size. Where no declaration is offered (another compositor, an app's
+own X11 window, a window manager without the announcement, `DXR_STEREO_DECLARE=0`) the target stays
+the window's size and the runtime logs why in a `FULL_SBS:` line, so the two views show side by
+side, flat. sim_display sets it for `SIM_DISPLAY_OUTPUT=sbs_full` (rendering mode 6, view scale
+1.0 x 1.0, 2x1 tiles).
 
 ### `create_dp_metal_for_screen` (multi-screen on macOS)
 
