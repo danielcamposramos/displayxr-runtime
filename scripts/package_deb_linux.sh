@@ -66,10 +66,12 @@
 #   compositor (KWin, #1928) installs alongside
 #   (docs/specs/runtime/wayland-window-geometry.md §4).
 #
-#   postinst writes /etc/xdg/openxr/1/active_runtime.json (the Khronos loader
-#   well-known path — the Linux ActiveRuntime equivalent) pointing at the
-#   installed runtime .so; postrm removes it (and restores any pre-existing
-#   runtime it backed up).
+#   /etc/xdg/openxr/1/openxr_displayxr.json, the runtime manifest (a conffile),
+#   joins the openxr1-active-runtime alternatives group that Debian's and
+#   Ubuntu's Monado use for /etc/xdg/openxr/1/active_runtime.json (the Khronos
+#   loader's well-known path, the Linux ActiveRuntime equivalent): postinst
+#   registers it, prerm unregisters it, and the link is only ever changed by
+#   update-alternatives, so every installed runtime stays selectable.
 #
 # Net effect (design in #781): an installed box needs ZERO env vars —
 #   * XR_RUNTIME_JSON        -> active_runtime.json (postinst)
@@ -582,9 +584,11 @@ Description: DisplayXR OpenXR runtime for 3D displays (sim-display)
  windows, components and performance settings, over displayxr-cli), and the
  vendor-neutral sim-display display processor as the built-in fallback.
  .
- After install the box needs no environment variables: the OpenXR ActiveRuntime
- is registered at /etc/xdg/openxr/1/active_runtime.json and the runtime's
- built-in plug-in dir (/usr/lib/displayxr/plugins) is searched automatically.
+ After install the box needs no environment variables: the runtime joins the
+ openxr1-active-runtime alternatives group of /etc/xdg/openxr/1/active_runtime.json
+ (beside Monado, when it is installed; update-alternatives --config chooses) and
+ the runtime's built-in plug-in dir (/usr/lib/displayxr/plugins) is searched
+ automatically.
  .
  A vendor display plug-in (e.g. Leia SR) installs alongside with a lower
  probe_order and claims the display automatically when present; otherwise
@@ -602,6 +606,24 @@ Description: DisplayXR OpenXR runtime for 3D displays (sim-display)
  user who has disabled it, and takes effect from that login.
 EOF
 
+# --- OpenXR runtime manifest ----------------------------------------------
+# A dpkg-tracked file the alternatives link points at. The OpenXR loader
+# specification ("Linux Installed Runtimes Enumeration") asks a runtime to put
+# its manifest in an XDG configuration directory for enumeration, and a tool
+# that changes the active runtime to update only the active_runtime.json link.
+mkdir -p "$STAGE/etc/xdg/openxr/1"
+cat > "$STAGE/etc/xdg/openxr/1/openxr_displayxr.json" <<EOF
+{
+    "file_format_version": "1.0.0",
+    "runtime": {
+        "name": "DisplayXR",
+        "library_path": "/usr/lib/displayxr/lib/openxr_displayxr.so"
+    }
+}
+EOF
+chmod 0644 "$STAGE/etc/xdg/openxr/1/openxr_displayxr.json"
+echo /etc/xdg/openxr/1/openxr_displayxr.json > "$STAGE/DEBIAN/conffiles"
+
 # --- maintainer scripts ----------------------------------------------------
 cat > "$STAGE/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
@@ -611,8 +633,8 @@ set -e
 
 CONF_DIR="/etc/xdg/openxr/1"
 ACTIVE="$CONF_DIR/active_runtime.json"
-BACKUP="$ACTIVE.pre-displayxr.bak"
-LIB="/usr/lib/displayxr/lib/openxr_displayxr.so"
+MANIFEST="$CONF_DIR/openxr_displayxr.json"
+MONADO="/usr/share/openxr/1/openxr_monado.json"
 
 # Run `systemctl --user <args>` in every user manager running right now
 # (--machine=USER@ needs systemd >= 248; Ubuntu 22.04 has 249). Never fails.
@@ -627,22 +649,30 @@ dxr_each_user_manager() {
 
 case "$1" in
 configure)
-    mkdir -p "$CONF_DIR"
-    # Preserve a pre-existing non-DisplayXR runtime so uninstall can restore it.
-    if [ -f "$ACTIVE" ] && ! grep -q "openxr_displayxr.so" "$ACTIVE" 2>/dev/null; then
-        cp -a "$ACTIVE" "$BACKUP" || true
-        echo "displayxr-runtime: backed up existing OpenXR active runtime to $BACKUP"
+    # Versions before this one wrote a plain file here, which keeps
+    # update-alternatives from making its link; it named this runtime, as the
+    # link will, so it goes. A plain file naming another runtime stays.
+    if [ -f "$ACTIVE" ] && [ ! -L "$ACTIVE" ] && grep -q "openxr_displayxr.so" "$ACTIVE" 2>/dev/null; then
+        rm -f "$ACTIVE"
     fi
-    cat > "$ACTIVE" <<JSON
-{
-    "file_format_version": "1.0.0",
-    "runtime": {
-        "name": "DisplayXR",
-        "library_path": "$LIB"
-    }
-}
-JSON
-    echo "displayxr-runtime: OpenXR ActiveRuntime -> $ACTIVE"
+    # Priority 60, above Monado's 50: installing DisplayXR makes it the active
+    # runtime in automatic mode, and a runtime chosen by hand
+    # (update-alternatives --config openxr1-active-runtime) stays chosen.
+    if [ -f "$MANIFEST" ]; then
+        update-alternatives --install "$ACTIVE" openxr1-active-runtime "$MANIFEST" 60
+    else
+        # a conffile deleted by hand stays deleted (dpkg); say so instead of failing
+        echo "displayxr-runtime: $MANIFEST was deleted, so DisplayXR is not offered as an OpenXR runtime." >&2
+        echo "  Restore it with:  sudo apt-get install --reinstall -o Dpkg::Options::=--force-confmiss displayxr-runtime" >&2
+    fi
+    # Versions before this one wrote through Monado's alternatives link into
+    # Monado's own manifest; only reinstalling Monado's package restores it.
+    if [ -f "$MONADO" ] && grep -q "openxr_displayxr.so" "$MONADO" 2>/dev/null; then
+        echo "displayxr-runtime: $MONADO names DisplayXR's runtime: an older DisplayXR package wrote it." >&2
+        echo "  Restore Monado's manifest with:  sudo apt-get install --reinstall libopenxr1-monado" >&2
+    fi
+    echo "displayxr-runtime: OpenXR active runtime: $(readlink -f "$ACTIVE")"
+    echo "  choose another with  sudo update-alternatives --config openxr1-active-runtime"
     echo "displayxr-runtime: verify with  displayxr-cli selftest"
 
     # displayxr-service (#1744): enable the socket for every user (a symlink
@@ -676,25 +706,9 @@ EOF
 
 cat > "$STAGE/DEBIAN/postrm" <<'EOF'
 #!/bin/sh
-# Undo the ActiveRuntime registration our postinst wrote (only if it still
-# points at us), restoring any runtime we backed up.
+# The active runtime link is update-alternatives' (prerm unregisters this
+# runtime from it); nothing else to undo.
 set -e
-
-CONF_DIR="/etc/xdg/openxr/1"
-ACTIVE="$CONF_DIR/active_runtime.json"
-BACKUP="$ACTIVE.pre-displayxr.bak"
-
-case "$1" in
-remove|purge|upgrade|deconfigure)
-    if [ -f "$ACTIVE" ] && grep -q "openxr_displayxr.so" "$ACTIVE" 2>/dev/null; then
-        rm -f "$ACTIVE"
-        if [ -f "$BACKUP" ]; then
-            mv "$BACKUP" "$ACTIVE"
-            echo "displayxr-runtime: restored previous OpenXR active runtime"
-        fi
-    fi
-    ;;
-esac
 
 exit 0
 EOF
@@ -721,6 +735,9 @@ dxr_each_user_manager() {
 
 case "$1" in
 remove|deconfigure)
+    # update-alternatives moves the link to the next runtime in the group, or
+    # removes it when this was the last one.
+    update-alternatives --remove openxr1-active-runtime /etc/xdg/openxr/1/openxr_displayxr.json
     if command -v systemctl >/dev/null 2>&1; then
         dxr_each_user_manager stop displayxr.socket displayxr.service
         systemctl --global disable displayxr.socket >/dev/null 2>&1 || true
