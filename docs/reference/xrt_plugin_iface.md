@@ -438,7 +438,9 @@ root window (`_KDE_NET_WM_STEREO_CONTENT_SUPPORTED`): the runtime sets `_KDE_NET
 = 3 on it, and the window manager keeps the window's place on screen while making the X window
 twice as wide, possibly seconds later. A Vulkan X11 swapchain is always the window's current size,
 so the target becomes two views wide only once the X window is; until then, and after a
-withdrawal, the window is presented at its own size. Where no declaration is offered (another compositor, an app's
+withdrawal, the window is presented at its own size. The flag counts only in a rendering mode with
+two or more views on a 3D display state: a 2D mode (qwerty's V, an app's request) hands the DP one
+view, and the declaration is withdrawn. Where no declaration is offered (another compositor, an app's
 own X11 window, a window manager without the announcement, `DXR_STEREO_DECLARE=0`) the target stays
 the window's size and the runtime logs why in a `FULL_SBS:` line, so the two views show side by
 side, flat. sim_display sets it for `SIM_DISPLAY_OUTPUT=sbs_full` (rendering mode 6, view scale
