@@ -144,6 +144,7 @@ set(tests
     tests_sim_input_hands
     tests_gamepad_map
     tests_gamepad_hid_report
+    tests_gamepad_evdev
     tests_ultraleap_map
     tests_touch_gesture
     tests_comp_layer_view_camera
@@ -1165,6 +1166,37 @@ target_include_directories(
 				 ${PROJECT_SOURCE_DIR}/src/xrt/auxiliary
 	)
 target_link_libraries(tests_gamepad_hid_report PRIVATE xrt-interfaces)
+# The Linux pad reader (drivers/gamepad/gamepad_evdev_decode.c, gamepad_evdev_core.c): the decoder on synthetic
+# input_event arrays, and the device layer on pipes and a scripted node list (hot plug, two pads, a pad that
+# goes away, SYN_DROPPED). No device node, no /dev/uinput; the real kernel run is tests/gamepad_evdev_uinput.sh.
+if(XRT_HAVE_LINUX AND NOT ANDROID)
+	target_sources(
+		tests_gamepad_evdev
+		PRIVATE ${PROJECT_SOURCE_DIR}/src/xrt/drivers/gamepad/gamepad_evdev_decode.c
+			${PROJECT_SOURCE_DIR}/src/xrt/drivers/gamepad/gamepad_evdev_core.c
+		)
+	target_include_directories(
+		tests_gamepad_evdev PRIVATE ${PROJECT_SOURCE_DIR}/src/xrt/drivers/gamepad
+				    ${PROJECT_SOURCE_DIR}/src/xrt/auxiliary
+		)
+	target_link_libraries(tests_gamepad_evdev PRIVATE xrt-interfaces)
+endif()
+# Dev probe (not a test, never built by default): the real Linux backend, polled as the hub does, printing the pad
+# state and the navigation pose derived from it; gamepad_evdev_uinput.py drives it with a virtual pad.
+if(XRT_HAVE_LINUX AND NOT ANDROID)
+	set(_gp ${PROJECT_SOURCE_DIR}/src/xrt/drivers/gamepad)
+	add_executable(
+		gamepad_evdev_probe EXCLUDE_FROM_ALL
+		gamepad_evdev_probe.c ${_gp}/gamepad_backend_evdev.c ${_gp}/gamepad_evdev_core.c ${_gp}/gamepad_evdev_decode.c
+		${_gp}/gamepad_map.c
+		)
+	target_include_directories(
+		gamepad_evdev_probe PRIVATE ${_gp} ${PROJECT_SOURCE_DIR}/src/xrt/auxiliary
+		)
+	target_link_libraries(gamepad_evdev_probe PRIVATE xrt-interfaces aux_util aux_os m)
+	set_target_properties(gamepad_evdev_probe PROPERTIES LINKER_LANGUAGE CXX)
+	unset(_gp)
+endif()
 # Dev probe (not a test, never built by default): reads the real Windows
 # gamepad backend -- XInput + HID dispatch -- and prints the live reader and
 # the pad state at 2 Hz for 15 s. `gamepad_backend_probe [--rumble]`.
