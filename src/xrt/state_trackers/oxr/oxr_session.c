@@ -49,6 +49,7 @@
 #include "util/u_canvas.h" // XR_DXR_display_zones zone-scoped locate
 #include "util/u_rear_budget.h" // XR_DXR_depth_budget policy state machine
 #include "util/u_camera_profile.h"
+#include "util/u_view_class.h"
 
 #include "math/m_api.h"
 #include "math/m_view_rig_point.h"
@@ -7805,9 +7806,21 @@ seed_legacy_camera_profile(struct oxr_session *sess, bool profile_external_bindi
 	struct u_camera_profile profile;
 	char error[192] = {0};
 	enum u_camera_profile_result result = u_camera_profile_load_for_process(aspect, &profile, error, sizeof(error));
-	if (result == U_CAMERA_PROFILE_NONE)
-		return;
-	if (result == U_CAMERA_PROFILE_INVALID) {
+	if (result == U_CAMERA_PROFILE_NONE) {
+		// No per-title record and no override: the kind of display the person chose (DXR_VIEW_CLASS, or the
+		// view-class file; the display's default when neither) supplies the separation and the screen plane.
+		enum u_view_class view_class;
+		enum u_view_class_source view_source;
+		char view_message[320];
+		if (!u_view_class_select_for_process(&view_class, &view_source, view_message, sizeof(view_message))) {
+			U_LOG_E("%s", view_message);
+		}
+		u_view_class_profile(view_class, &profile);
+		U_LOG_W("View class: %s (%s)", u_view_class_name(view_class),
+		        view_source == U_VIEW_CLASS_FROM_ENVIRONMENT ? "DXR_VIEW_CLASS"
+		        : view_source == U_VIEW_CLASS_FROM_FILE      ? "the view-class file"
+		                                                     : "the display's default");
+	} else if (result == U_CAMERA_PROFILE_INVALID) {
 		U_LOG_W("Legacy camera profile ignored: %s", error);
 		return;
 	}
