@@ -12836,6 +12836,23 @@ vk_compositor_layer_commit_locked(struct xrt_compositor *xc,
 						comp_vk_native_renderer_resize(
 						    c->renderer, new_vw, new_vh, new_aw, new_ah);
 					}
+				} else {
+					// Legacy app: the view dims stay at the size it was told,
+					// but the atlas must hold the grid of the mode now active.
+					// set_sys_info sized it for the mode active THEN; a session
+					// created while the display was in 2D (an end->begin cycle:
+					// oxr_session_end drops to mode 0 and xrBeginSession restores
+					// the mode, #1041) got a one-tile atlas, and every view after
+					// the first fell outside it and was never drawn.
+					uint32_t cur_tc = 0, cur_tr = 0, cur_vw = 0, cur_vh = 0;
+					comp_vk_native_renderer_get_tile_layout(c->renderer, &cur_tc, &cur_tr);
+					comp_vk_native_renderer_get_view_dimensions(c->renderer, &cur_vw, &cur_vh);
+					if ((cur_tc != mode->tile_columns || cur_tr != mode->tile_rows) && cur_vw > 0 &&
+					    cur_vh > 0) {
+						comp_vk_native_renderer_resize(c->renderer, cur_vw, cur_vh,
+						                               mode->tile_columns * cur_vw,
+						                               mode->tile_rows * cur_vh);
+					}
 				}
 				// Always update tile layout (both legacy and extension apps)
 				comp_vk_native_renderer_set_tile_layout(
