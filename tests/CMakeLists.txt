@@ -98,6 +98,7 @@ set(tests
     tests_aux_wayland_geom
     tests_comp_wl_move_sync_tag
     tests_comp_xcb_full_sbs
+    tests_comp_xcb_depth_limits
     tests_comp_vk_async_handoff
     tests_aux_weave_span2d
     tests_aux_weave_present_origin
@@ -1422,6 +1423,8 @@ target_include_directories(tests_comp_wl_move_sync_tag PRIVATE ${PROJECT_SOURCE_
 # The runtime's own X11 window declared full side by side follows the window
 # manager's doubling. Header-only.
 target_include_directories(tests_comp_xcb_full_sbs PRIVATE ${PROJECT_SOURCE_DIR}/src/xrt/compositor)
+# The depth limits Stereo KWin writes on the same window. Header-only.
+target_include_directories(tests_comp_xcb_depth_limits PRIVATE ${PROJECT_SOURCE_DIR}/src/xrt/compositor)
 # #2356 -- which frames may take the non-blocking hand-off. Header-only.
 target_include_directories(tests_comp_vk_async_handoff PRIVATE ${PROJECT_SOURCE_DIR}/src/xrt/compositor)
 # ADR-027 tier-1 dispatch (#1331). Header-only pure logic -- no compositor

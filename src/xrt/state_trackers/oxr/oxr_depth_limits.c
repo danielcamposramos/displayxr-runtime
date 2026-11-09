@@ -109,8 +109,9 @@ oxr_depth_limits_update(struct oxr_depth_limits_state *st,
 		if (!st->said_none || st->said_none_settings_serial != st->settings_serial) {
 			st->said_none = true;
 			st->said_none_settings_serial = st->settings_serial;
-			U_LOG_W("Depth limits: none. The compositor announced no depth limits for this window (Stereo KWin sends "
-			        "them to Wayland surfaces, and this window is an X11 client of Xwayland), and no absolute sunk "
+			U_LOG_W("Depth limits: none. The compositor announced no depth limits for this window (Stereo KWin "
+			        "sends them to a Wayland surface that asks, and writes _KDE_NET_WM_STEREO_DEPTH_LIMITS on an "
+			        "X11 window that declares full side by side; neither has arrived), and no absolute sunk "
 			        "value is set (DXR_VIEW_SUNK_PX, or sunk-px in the file view-depth). The camera rig keeps "
 			        "DisplayXR's own defaults (ipdFactor 1, convergence 0.5 diopters); the class, strength and "
 			        "screen plane have no limits to apply to.");

@@ -116,6 +116,7 @@
 
 #ifdef XRT_OS_LINUX_DESKTOP
 #include "vk_native/comp_vk_native_window_xcb.h"
+#include "vk_native/comp_vk_native_xcb_depth_limits.h"
 #include "os/os_display_scale.h"
 #include "util/u_x11_scale.h"
 #endif
@@ -6017,6 +6018,14 @@ vk_full_sbs_refresh_locked(struct comp_vk_native_compositor *c)
 					    "views are presented once the window manager has made the X window "
 					    "twice as wide",
 					    x11_supported, c->settings.preferred.width, c->settings.preferred.height);
+
+					if (x11_supported < COMP_VK_NATIVE_XCB_DEPTH_LIMITS_MIN_SUPPORTED) {
+						U_LOG_W(
+						    "Depth limits: the window manager announces version %u of the stereo "
+						    "declaration; the window gets its depth limits (_KDE_NET_WM_STEREO_DEPTH_LIMITS) "
+						    "from version %u on, so the camera rig has none from the compositor",
+						    x11_supported, COMP_VK_NATIVE_XCB_DEPTH_LIMITS_MIN_SUPPORTED);
+					}
 				}
 			}
 #endif

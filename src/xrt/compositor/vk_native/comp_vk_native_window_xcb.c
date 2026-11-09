@@ -9,6 +9,8 @@
 
 #include "comp_vk_native_window_xcb.h"
 #include "comp_vk_native_xcb_full_sbs.h"
+#include "comp_vk_native_xcb_depth_limits.h"
+#include "util/u_depth_limits.h"
 
 #include "util/u_debug.h"
 #include "util/u_misc.h"
@@ -55,6 +57,13 @@ struct comp_vk_native_window_xcb
 	//! a stereo window manager that holds it at both views' width
 	//! (comp_vk_native_window_xcb_set_full_sbs).
 	struct comp_vk_native_xcb_full_sbs full_sbs;
+
+	//! `_KDE_NET_WM_STEREO_DEPTH_LIMITS` (comp_vk_native_xcb_depth_limits.h), whose changes on the window the pump
+	//! reads, and what it last read from it.
+	xcb_atom_t atom_depth_limits;
+	enum comp_vk_native_xcb_depth_limits_status depth_limits_status;
+	double depth_limits_sunk_px;
+	double depth_limits_popped_px;
 
 	//! Cleared when the user closes the window (WM_DELETE_WINDOW / DestroyNotify).
 	bool valid;
@@ -581,6 +590,8 @@ comp_vk_native_window_xcb_create(uint32_t width,
 	os_mutex_init(&win->pump_lock);
 
 	win->window = xcb_generate_id(conn);
+	// Interned (created if absent) so a change of the property can be told from the others of the window.
+	win->atom_depth_limits = intern_atom(conn, "_KDE_NET_WM_STEREO_DEPTH_LIMITS");
 
 	// Adopt-own-window mode (#2322). DXR_XCB_ADOPT_OWN_WINDOW=1 forces it, =0
 	// disables it; unset, it follows @p adopt_own_window_auto. Falls back to a
@@ -627,7 +638,7 @@ comp_vk_native_window_xcb_create(uint32_t width,
 		value_mask = XCB_CW_BACK_PIXEL | XCB_CW_BORDER_PIXEL | XCB_CW_EVENT_MASK | XCB_CW_COLORMAP;
 		value_list[0] = 0; // fully-transparent background fill
 		value_list[1] = 0; // border pixel (required with a non-parent colormap)
-		value_list[2] = XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_WINDOW_INPUT_EVENT_MASK;
+		value_list[2] = XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_WINDOW_INPUT_EVENT_MASK;
 		value_list[3] = win->colormap;
 		U_LOG_I("XCB: transparent-background mode — 32-bit ARGB visual 0x%x", (unsigned)argb_visual);
 	} else {
@@ -637,7 +648,7 @@ comp_vk_native_window_xcb_create(uint32_t width,
 		}
 		value_mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 		value_list[0] = screen->black_pixel;
-		value_list[1] = XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_WINDOW_INPUT_EVENT_MASK;
+		value_list[1] = XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_WINDOW_INPUT_EVENT_MASK;
 	}
 
 	// Position on the 3D display. The vendor plug-in publishes the panel's
@@ -972,6 +983,61 @@ comp_vk_native_window_xcb_query_refresh_hz(const struct comp_vk_native_xcb_handl
 	return false;
 }
 
+/*!
+ * The depth limits Stereo KWin wrote on the window (comp_vk_native_xcb_depth_limits.h): read again on every
+ * PropertyNotify for them, and handed to u_depth_limits_publish() so the sessions' camera rigs follow them live.
+ * Said when they first arrive, when they change, when they go and when the property is not what KWin writes.
+ * Called with the pump lock held.
+ */
+static void
+read_depth_limits(struct comp_vk_native_window_xcb *win)
+{
+	xcb_get_property_reply_t *pr = xcb_get_property_reply(
+	    win->connection,
+	    xcb_get_property(win->connection, 0, win->window, win->atom_depth_limits, XCB_ATOM_ANY, 0, 3), NULL);
+	if (pr == NULL) {
+		return;
+	}
+	double sunk = 0.0;
+	double popped = 0.0;
+	const enum comp_vk_native_xcb_depth_limits_status status = comp_vk_native_xcb_depth_limits_decode(
+	    pr->type != XCB_ATOM_NONE, pr->type == XCB_ATOM_CARDINAL, pr->format, (uint32_t)pr->value_len,
+	    pr->bytes_after, (const uint32_t *)xcb_get_property_value(pr), &sunk, &popped);
+	const uint32_t format = pr->format;
+	const uint32_t value_len = (uint32_t)pr->value_len;
+	free(pr);
+
+	switch (status) {
+	case COMP_VK_NATIVE_XCB_DEPTH_LIMITS_OK:
+		if (win->depth_limits_status != status || win->depth_limits_sunk_px != sunk ||
+		    win->depth_limits_popped_px != popped) {
+			U_LOG_W("XCB: Stereo KWin tells this window its depth limits (_KDE_NET_WM_STEREO_DEPTH_LIMITS): "
+			        "sunk %.4g px, popped %.4g px of a view 1920 wide, for the output the window mainly sits on",
+			        sunk, popped);
+		}
+		win->depth_limits_sunk_px = sunk;
+		win->depth_limits_popped_px = popped;
+		u_depth_limits_publish(sunk, popped);
+		break;
+	case COMP_VK_NATIVE_XCB_DEPTH_LIMITS_MALFORMED:
+		if (win->depth_limits_status != status) {
+			U_LOG_E("XCB: _KDE_NET_WM_STEREO_DEPTH_LIMITS on this window is not two non-negative CARDINAL/32 "
+			        "values (format %u, %u values or a wrong type); the depth limits are not used",
+			        format, value_len);
+		}
+		u_depth_limits_withdraw();
+		break;
+	case COMP_VK_NATIVE_XCB_DEPTH_LIMITS_ABSENT:
+		if (win->depth_limits_status == COMP_VK_NATIVE_XCB_DEPTH_LIMITS_OK) {
+			U_LOG_W("XCB: Stereo KWin no longer tells this window its depth limits (the property is gone: "
+			        "the window is no longer declared, or the window manager changed)");
+		}
+		u_depth_limits_withdraw();
+		break;
+	}
+	win->depth_limits_status = status;
+}
+
 void
 comp_vk_native_window_xcb_pump(struct comp_vk_native_window_xcb *win)
 {
@@ -1039,6 +1105,14 @@ comp_vk_native_window_xcb_pump(struct comp_vk_native_window_xcb *win)
 				    "%ux%u, one view %ux%u",
 				    win->full_sbs.width, win->full_sbs.height, win->full_sbs.width / 2u,
 				    win->full_sbs.height);
+			}
+			break;
+		}
+		case XCB_PROPERTY_NOTIFY: {
+			const xcb_property_notify_event_t *pn = (const xcb_property_notify_event_t *)event;
+			if (pn->window == win->window && win->atom_depth_limits != XCB_ATOM_NONE &&
+			    pn->atom == win->atom_depth_limits) {
+				read_depth_limits(win);
 			}
 			break;
 		}
