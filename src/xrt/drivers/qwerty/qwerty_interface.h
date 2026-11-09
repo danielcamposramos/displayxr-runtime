@@ -318,6 +318,13 @@ qwerty_get_view_state(struct xrt_device **xdevs,
 bool
 qwerty_set_camera_profile(struct xrt_device **xdevs, size_t xdev_count, const struct u_camera_profile *profile);
 
+//! Change the camera rig's separation and zero-parallax plane while the session runs (the depth limits of the
+//! output changed, or the person changed them). Space resets to these values from now on; the person's live keys
+//! still work on top of them. Navigation is untouched. Returns false if no qwerty system exists or display mode is
+//! active.
+bool
+qwerty_set_camera_depth(struct xrt_device **xdevs, size_t xdev_count, float ipd_factor, float inv_convergence_distance);
+
 
 /*!
  * Enable or disable qwerty input processing (keyboard/mouse events).

@@ -26,6 +26,7 @@
 
 #include "os/os_threading.h"
 
+#include "oxr_depth_limits.h"
 #include "util/u_index_fifo.h"
 #include "util/u_hashset.h"
 #include "util/u_hashmap.h"
@@ -2774,6 +2775,8 @@ struct oxr_instance
 	struct os_mutex sessions_mutex;
 	//! One lazy camera-profile lookup per instance; guarded by sessions_mutex.
 	bool camera_profile_checked;
+	//! The legacy camera rig follows the depth limits (ORDER 478 M2b); guarded by its own lock.
+	struct oxr_depth_limits_state depth_limits;
 
 	struct
 	{

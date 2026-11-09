@@ -6,6 +6,7 @@
 set(tests
     tests_camera_profile
     tests_view_class
+    tests_depth_limits
     tests_oxr_session_window_binding
     tests_cxx_wrappers
     tests_deque

@@ -1634,6 +1634,34 @@ qwerty_set_camera_profile(struct xrt_device **xdevs, size_t count, const struct 
 }
 
 bool
+qwerty_set_camera_depth(struct xrt_device **xdevs, size_t count, float ipd_factor, float inv_convergence_distance)
+{
+	struct qwerty_system *qs = find_qwerty_system(xdevs, count);
+	if (qs == NULL) {
+		return false;
+	}
+	os_mutex_lock(&qs->view_lock);
+	const bool available = qs->camera_mode;
+	if (available) {
+		qs->cam_spread_factor = ipd_factor;
+		qs->cam_convergence = inv_convergence_distance;
+		// Space resets to the values in force: the depth the limits give, not the ones before them.
+		struct u_camera_profile defaults = U_CAMERA_PROFILE_DEFAULT;
+		if (!qs->camera_profile_active) {
+			qs->camera_profile = defaults;
+			qs->camera_profile.half_tan_vfov = qs->cam_half_tan_vfov;
+			qs->camera_profile.m2v = qs->cam_m2v;
+			qs->camera_profile.parallax_factor = qs->cam_parallax_factor;
+			qs->camera_profile_active = true;
+		}
+		qs->camera_profile.ipd_factor = ipd_factor;
+		qs->camera_profile.inv_convergence_distance = inv_convergence_distance;
+	}
+	os_mutex_unlock(&qs->view_lock);
+	return available;
+}
+
+bool
 qwerty_get_view_state(struct xrt_device **xdevs, size_t xdev_count, struct qwerty_view_state *out)
 {
 	if (xdevs == NULL || out == NULL) {

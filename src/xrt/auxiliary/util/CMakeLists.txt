@@ -19,6 +19,8 @@ add_library(
 	aux_util STATIC
 	u_camera_profile.c
 	u_camera_profile.h
+	u_depth_limits.c
+	u_depth_limits.h
 	u_view_class.c
 	u_view_class.h
 	u_exe_basename.c

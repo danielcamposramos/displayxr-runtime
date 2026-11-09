@@ -53,6 +53,8 @@ add_library(
 	oxr_pretty_print.c
 	oxr_pretty_print.h
 	oxr_segment_views.c
+	oxr_depth_limits.c
+	oxr_depth_limits.h
 	oxr_session.c
 	oxr_session_window_binding.h
 	oxr_session_frame_end.c

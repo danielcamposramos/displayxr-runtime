@@ -48,7 +48,7 @@ geometry that is unavailable at instance creation. Editing a file or changing
 the override does not reseed existing instances, even if another session is
 created. Concurrent session creation claims this initialization once.
 
-A missing per-application file uses the selected view class's defaults ([view-class.md](view-class.md)), with one `View class:` line in the log.
+A missing per-application file lets the camera rig follow the depth limits of the output ([depth-limits.md](depth-limits.md)), with one `Depth limits:` line in the log.
 Invalid data or an unreadable explicit override is reported and ignored as a
 whole; an invalid override does not fall through to a different per-application
 file. A missing or invalid profile also completes that instance's lookup attempt.

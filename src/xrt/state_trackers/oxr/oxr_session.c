@@ -50,6 +50,7 @@
 #include "util/u_rear_budget.h" // XR_DXR_depth_budget policy state machine
 #include "util/u_camera_profile.h"
 #include "util/u_view_class.h"
+#include "oxr_depth_limits.h"
 
 #include "math/m_api.h"
 #include "math/m_view_rig_point.h"
@@ -4698,6 +4699,23 @@ locate_views_one(struct oxr_logger *log,
 					    .half_tan_vfov = active_rig->half_tan_vfov,
 					    .m2v = active_rig->m2v,
 					};
+#ifdef XRT_BUILD_DRIVER_QWERTY
+					if (qwerty_camera && !rig_camera) {
+						// ORDER 478 M2b: the legacy camera rig follows the depth limits. When they, the person's
+						// choices, the eyes or the canvas changed, the separation and the plane are solved again
+						// and written to the rig, where the person's live keys still act on them.
+						float ipd_new, invc_new;
+						if (oxr_depth_limits_update(&sess->sys->inst->depth_limits, raw_eyes, eye_count,
+						                            screen_height_m > 0.0f ? screen_width_m / screen_height_m : 0.0f,
+						                            nominal.z, active_rig->half_tan_vfov, active_rig->m2v, &ipd_new,
+						                            &invc_new)) {
+							(void)qwerty_set_camera_depth(sess->sys->xsysd->xdevs, sess->sys->xsysd->xdev_count,
+							                              ipd_new, invc_new);
+							ct.ipd_factor = ipd_new;
+							ct.inv_convergence_distance = invc_new;
+						}
+					}
+#endif
 					struct dxr_xrt_view cam_views[XRT_MAX_VIEWS];
 					dxr_xrt_camera3d_compute_views(raw_eyes, eye_count, &nominal, &scr, &ct,
 					                               &display_pose, cam_views);
@@ -7807,19 +7825,11 @@ seed_legacy_camera_profile(struct oxr_session *sess, bool profile_external_bindi
 	char error[192] = {0};
 	enum u_camera_profile_result result = u_camera_profile_load_for_process(aspect, &profile, error, sizeof(error));
 	if (result == U_CAMERA_PROFILE_NONE) {
-		// No per-title record and no override: the kind of display the person chose (DXR_VIEW_CLASS, or the
-		// view-class file; the display's default when neither) supplies the separation and the screen plane.
-		enum u_view_class view_class;
-		enum u_view_class_source view_source;
-		char view_message[320];
-		if (!u_view_class_select_for_process(&view_class, &view_source, view_message, sizeof(view_message))) {
-			U_LOG_E("%s", view_message);
-		}
-		u_view_class_profile(view_class, &profile);
-		U_LOG_W("View class: %s (%s)", u_view_class_name(view_class),
-		        view_source == U_VIEW_CLASS_FROM_ENVIRONMENT ? "DXR_VIEW_CLASS"
-		        : view_source == U_VIEW_CLASS_FROM_FILE      ? "the view-class file"
-		                                                     : "the display's default");
+		// No per-title record and no override: the camera rig follows the depth limits (u_depth_limits.h): the
+		// compositor's for the output, the person's choices on top. Nothing is seeded here; the first locate
+		// solves the rig from the limits, and says so when there are none.
+		oxr_depth_limits_start(&inst->depth_limits);
+		return;
 	} else if (result == U_CAMERA_PROFILE_INVALID) {
 		U_LOG_W("Legacy camera profile ignored: %s", error);
 		return;

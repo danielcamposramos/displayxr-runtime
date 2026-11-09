@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
-#include "util/u_camera_profile.h"
-
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -11,22 +9,29 @@
 extern "C" {
 #endif
 
-//! The kind of display a legacy application's two views are made for. The person chooses it; the runtime never
+//! The kind of display the person says a legacy application's two views are made for. The names are the browser's
+//! flat modes (`dom.vr.flat.mode`: tv, headset), so one idea has one name. The person chooses; the runtime never
 //! decides it from the output (one desktop can drive a 3D television and a viewer at the same time).
 enum u_view_class
 {
-	//! A 3D screen (television, projector, monitor, anaglyph): gentle separation, the nearest things pop a little.
-	U_VIEW_CLASS_SCREEN = 0,
-	//! A headset (or a phone in a viewer): the display's own eye separation, a larger one than a screen takes.
-	U_VIEW_CLASS_HEADSET = 1,
+	//! Nothing chosen: the depth limits of the output the compositor announces, as they are.
+	U_VIEW_CLASS_AUTO = 0,
+	//! A framed 3D screen (television, projector, monitor, anaglyph): the limits as the compositor announces them.
+	U_VIEW_CLASS_TV = 1,
+	//! A headset (or a phone in a viewer): libstereo-policy's headset factor over a framed screen's limits.
+	U_VIEW_CLASS_HEADSET = 2,
 };
 
-//! The names the selector takes, in order of enum u_view_class.
-#define U_VIEW_CLASS_NAMES "screen, headset"
+//! The names the selector takes.
+#define U_VIEW_CLASS_NAMES "tv, headset"
+
+//! libstereo-policy's kind factors (stereo_policy_display_depth, STEREO_POLICY_DISPLAY_*): framed 1.0, headset 2.5.
+#define U_VIEW_CLASS_TV_FACTOR 1.0
+#define U_VIEW_CLASS_HEADSET_FACTOR 2.5
 
 enum u_view_class_source
 {
-	U_VIEW_CLASS_FROM_DEFAULT = 0, //!< nothing set it: the default of the display (U_VIEW_CLASS_SCREEN)
+	U_VIEW_CLASS_FROM_DEFAULT = 0, //!< nothing set it: the limits as announced (U_VIEW_CLASS_AUTO)
 	U_VIEW_CLASS_FROM_ENVIRONMENT, //!< DXR_VIEW_CLASS
 	U_VIEW_CLASS_FROM_FILE,        //!< view-class in the runtime's configuration directory
 };
@@ -35,16 +40,13 @@ enum u_view_class_source
 bool
 u_view_class_parse(const char *name, enum u_view_class *out);
 
-//! The selector's name, as u_view_class_parse takes it.
+//! The selector's name, as u_view_class_parse takes it; "auto" for U_VIEW_CLASS_AUTO.
 const char *
 u_view_class_name(enum u_view_class cls);
 
-/*!
- * The camera-rig profile a class stands for: the separation (ipdFactor) and the zero-parallax distance
- * (convergence) that differ between kinds of display; everything else keeps the qwerty defaults.
- */
-void
-u_view_class_profile(enum u_view_class cls, struct u_camera_profile *out);
+//! The factor a class puts on the limits the compositor announces (auto and tv 1, headset 2.5).
+double
+u_view_class_factor(enum u_view_class cls);
 
 /*!
  * Resolve the person's selector, in this order: the environment value @p env_value (DXR_VIEW_CLASS), then the
