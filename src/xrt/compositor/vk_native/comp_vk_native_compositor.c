@@ -664,6 +664,8 @@ struct comp_vk_native_compositor
 		const struct xrt_display_processor *read_dp;
 		uint32_t read_mode_index;
 		const char *refused;
+		//! A layout of 2D content that is not laid in every view was told to the person (the problem "layout").
+		bool layout_refused;
 	} full_sbs;
 #if defined(XRT_HAVE_WAYLAND) && defined(DXR_HAVE_WL_STEREO)
 	//! The app surface's stereo declaration (NULL: the compositor takes none).
@@ -4300,7 +4302,7 @@ vk_composite_offpanel_2d(struct comp_vk_native_compositor *c,
 		return;
 	}
 	// A declared full side by side target is views_across windows wide: its extent is not a window rectangle on
-	// the panel, and nothing in it is woven, so there is no off-panel band to paint flat.
+	// the panel, and nothing in it is woven, so there is no off-panel band to paint flat (#2576).
 	if (!u_wl_target_follows_panel_rules(vk_output_views_across(c))) {
 		return;
 	}
@@ -5741,7 +5743,7 @@ vk_linux_update_surface_not_1to1(struct comp_vk_native_compositor *c)
 	// (a) stays: off the panel, native Wayland has no segment to weave into.
 	const bool tolerant = c->display_processor != NULL && c->dp_tolerates_resample;
 	// A window declared full side by side to a stereo compositor is not woven, so none of this applies: the
-	// compositor scales each view over the window and its outputs make the screen's format.
+	// compositor scales each view over the window and its outputs make the screen's format (#2576).
 	const bool not_1to1 = u_wl_target_follows_panel_rules(vk_output_views_across(c)) &&
 	                      (!on_panel || (!tolerant && (!fits_window || !fits_surface)));
 
@@ -13198,8 +13200,10 @@ vk_compositor_layer_commit_locked(struct xrt_compositor *xc,
 			// so the projection-only capture point after it shows it).
 			comp_vk_native_renderer_set_cursor(c->renderer, &cursor_draw);
 		}
-		xret = comp_vk_native_renderer_draw(
-		    c->renderer, &c->layer_accum, &left_eye, &right_eye, tgt_width, tgt_height, &c->eff_layout);
+		// The renderer places a zone by its window-space rect scaled into the tile: the width it is given is
+		// the window's, which a declared full side by side target holds once per view.
+		xret = comp_vk_native_renderer_draw(c->renderer, &c->layer_accum, &left_eye, &right_eye,
+		                                    tgt_width / vk_output_views_across(c), tgt_height, &c->eff_layout);
 		if (xret != XRT_SUCCESS) {
 			U_LOG_E("Failed to render layers");
 			return xret;
@@ -19064,13 +19068,15 @@ vk_local2d_begin_frame_once(struct comp_vk_native_compositor *c)
 // (legacy hatch, or a bridge plane) keep the non-decoding view: bytes pass
 // through exactly as before.
 static void
-vk_flatten_one_local2d_layer(struct comp_vk_native_compositor *c,
-                             VkCommandBuffer cmd,
-                             VkFramebuffer target_fb,
-                             bool srgb_target,
-                             struct comp_layer *layer,
-                             uint32_t region_w,
-                             uint32_t region_h)
+vk_flatten_one_local2d_layer_at(struct comp_vk_native_compositor *c,
+                                VkCommandBuffer cmd,
+                                VkFramebuffer target_fb,
+                                bool srgb_target,
+                                struct comp_layer *layer,
+                                uint32_t region_w,
+                                uint32_t region_h,
+                                int32_t shift_x,
+                                uint32_t view_w)
 {
 	struct vk_bundle *vk = &c->vk;
 	struct xrt_swapchain *sc = layer->sc_array[0];
@@ -19085,14 +19091,16 @@ vk_flatten_one_local2d_layer(struct comp_vk_native_compositor *c,
 		return;
 	}
 
+	// The layer's rect is in window pixels; shift_x moves it into the view of a declared full side by side
+	// target it is drawn in, and view_w keeps it inside that view.
 	const struct xrt_rect *dr = &layer->data.local_2d.rect;
-	int32_t dx = dr->offset.w, dy = dr->offset.h, dw = dr->extent.w, dh = dr->extent.h;
+	int32_t dx = dr->offset.w + shift_x, dy = dr->offset.h, dw = dr->extent.w, dh = dr->extent.h;
 	if (dw <= 0 || dh <= 0) {
 		return;
 	}
-	int32_t x0 = dx < 0 ? 0 : dx;
+	int32_t x0 = dx < shift_x ? shift_x : dx;
 	int32_t y0 = dy < 0 ? 0 : dy;
-	int32_t x1 = (dx + dw) > (int32_t)region_w ? (int32_t)region_w : (dx + dw);
+	int32_t x1 = (dx + dw) > shift_x + (int32_t)view_w ? shift_x + (int32_t)view_w : (dx + dw);
 	int32_t y1 = (dy + dh) > (int32_t)region_h ? (int32_t)region_h : (dy + dh);
 	if (x1 <= x0 || y1 <= y0) {
 		return;
@@ -19130,6 +19138,18 @@ vk_flatten_one_local2d_layer(struct comp_vk_native_compositor *c,
 		                                  (uint32_t)(x1 - x0), (uint32_t)(y1 - y0), src_x, src_y, src_w, src_h,
 		                                  unpremult);
 	}
+}
+
+static void
+vk_flatten_one_local2d_layer(struct comp_vk_native_compositor *c,
+                             VkCommandBuffer cmd,
+                             VkFramebuffer target_fb,
+                             bool srgb_target,
+                             struct comp_layer *layer,
+                             uint32_t region_w,
+                             uint32_t region_h)
+{
+	vk_flatten_one_local2d_layer_at(c, cmd, target_fb, srgb_target, layer, region_w, region_h, 0, region_w);
 }
 
 #ifdef XRT_OS_WINDOWS
@@ -20476,11 +20496,17 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 		}
 	}
 
+	// A window declared full side by side to a stereo compositor presents its views side by side in a target
+	// views_across windows wide. Flat content is the same pixels in every view, at the screen: each 2D layer
+	// and each zone rectangle, which the app gives in window pixels, is laid once in every view (#2576).
+	const uint32_t views = vk_output_views_across(c);
+	const uint32_t view_w = region_w / views;
+
 	// Collect this frame's OVER Local2D layer rects (for the implicit mask) once
 	// — under-layers are the backdrop, not part of the overlay mask. In zones
 	// frames there is no under/over split (2D-under reserved in v1): every
 	// Local2D layer flattens as 2D-over.
-	struct xrt_rect rects[XRT_MAX_LAYERS];
+	struct xrt_rect rects[XRT_MAX_LAYERS * 2];
 	uint32_t rect_count = 0;
 	for (uint32_t i = 0; i < c->layer_accum.layer_count && rect_count < XRT_MAX_LAYERS; i++) {
 		if (c->layer_accum.layers[i].data.type != XRT_LAYER_LOCAL_2D) {
@@ -20490,6 +20516,42 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 			continue; // under-layer (backdrop) — skip
 		}
 		rects[rect_count++] = c->layer_accum.layers[i].data.local_2d.rect;
+	}
+	// The same rectangles again in every further view.
+	{
+		const uint32_t single = rect_count;
+		for (uint32_t v = 1; v < views; v++) {
+			for (uint32_t i = 0; i < single; i++) {
+				rects[rect_count] = rects[i];
+				rects[rect_count].offset.w += (int32_t)(v * view_w);
+				rect_count++;
+			}
+		}
+	}
+	// A layout of 2D content that cannot be laid in every view of a declared full side by side target is told to
+	// the person (an authored mask spans the whole target, and the 2D-under backdrop is the display processor's
+	// own), once when the answer changes, never per frame.
+	if (views > 1) {
+		const struct comp_vk_native_zone_mask *authored = c->active_zone_mask;
+		const char *why = NULL;
+		if (!zones_frame && authored != NULL && authored->submitted && authored->staged_view != VK_NULL_HANDLE) {
+			why = "the program authored its own mask for the 2D content";
+		}
+		for (uint32_t i = 0; why == NULL && !zones_frame && proj_idx >= 0 && i < (uint32_t)proj_idx; i++) {
+			if (c->layer_accum.layers[i].data.type == XRT_LAYER_LOCAL_2D) {
+				why = "the program places 2D content under the 3D";
+			}
+		}
+		if ((why != NULL) != c->full_sbs.layout_refused) {
+			c->full_sbs.layout_refused = why != NULL;
+			U_LOG_W("FULL_SBS: %s, which DisplayXR cannot lay in both pictures of a window declared full side by "
+			        "side%s",
+			        why != NULL ? why : "the layout of the 2D content", why != NULL ? "" : " (ended)");
+			comp_vk_native_problems_layout(why != NULL, why);
+		}
+	} else if (c->full_sbs.layout_refused) {
+		c->full_sbs.layout_refused = false;
+		comp_vk_native_problems_layout(false, NULL);
 	}
 	if (rect_count == 0 && !zones_frame) {
 		return false; // only under-layers (or stale flag) — nothing to overlay
@@ -20510,7 +20572,8 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 				covers_region = false; // a feathered edge is not the identity
 				break;
 			}
-			if (r.offset.w <= 0 && r.offset.h <= 0 && r.extent.w >= (int32_t)region_w &&
+			// In every view the zone covers the window's pixels, which is view_w wide.
+			if (r.offset.w <= 0 && r.offset.h <= 0 && r.extent.w >= (int32_t)view_w &&
 			    r.extent.h >= (int32_t)region_h) {
 				covers_region = true;
 			}
@@ -20535,6 +20598,19 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 				any_feather = true;
 			}
 			zone_rects[zone_rect_count++] = c->layer_accum.layers[i].data.zone_3d.rect;
+		}
+	}
+	// What the composite rasters and clips by: every zone in every view. zone_rects stays the app's own list, in
+	// window pixels, which is what the hardware wish is about.
+	struct xrt_rect mask_zone_rects[XRT_MAX_LAYERS * 2];
+	float mask_zone_feathers[XRT_MAX_LAYERS * 2];
+	uint32_t mask_zone_count = 0;
+	for (uint32_t v = 0; v < views; v++) {
+		for (uint32_t i = 0; i < zone_rect_count; i++) {
+			mask_zone_rects[mask_zone_count] = zone_rects[i];
+			mask_zone_rects[mask_zone_count].offset.w += (int32_t)(v * view_w);
+			mask_zone_feathers[mask_zone_count] = zone_feathers[i];
+			mask_zone_count++;
 		}
 	}
 
@@ -20609,9 +20685,11 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 			if (!zones_frame && proj_idx >= 0 && (int32_t)i < proj_idx) {
 				continue;
 			}
-			vk_flatten_one_local2d_layer(c, cmd, c->local2d_scratch_fb,
-			                             c->local2d_scratch_srgb_view != VK_NULL_HANDLE, layer, region_w,
-			                             region_h);
+			for (uint32_t v = 0; v < views; v++) {
+				vk_flatten_one_local2d_layer_at(c, cmd, c->local2d_scratch_fb,
+				                                c->local2d_scratch_srgb_view != VK_NULL_HANDLE, layer,
+				                                region_w, region_h, (int32_t)(v * view_w), view_w);
+			}
 		}
 		vk_cmd_image_barrier_locked(vk, cmd, c->local2d_scratch, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 		                            VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -20680,7 +20758,7 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 			                            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 			                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, k_color_sub);
 			vk_local2d_composite_raster_mask(&c->local2d, vk, cmd, c->implicit_mask_fb, region_w, region_h,
-			                                 0.0f, zone_rects, zone_rect_count, 1.0f);
+			                                 0.0f, mask_zone_rects, mask_zone_count, 1.0f);
 			vk_cmd_image_barrier_locked(vk, cmd, c->implicit_mask_tex, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 			                            VK_ACCESS_SHADER_READ_BIT,
 			                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -20705,8 +20783,8 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 					    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 					    k_color_sub);
 					vk_local2d_composite_raster_mask_zones(&c->local2d, vk, cmd, c->feather_mask_fb,
-					                                       region_w, region_h, zone_rects, zone_feathers,
-					                                       zone_rect_count);
+					                                       region_w, region_h, mask_zone_rects,
+					                                       mask_zone_feathers, mask_zone_count);
 					vk_cmd_image_barrier_locked(
 					    vk, cmd, c->feather_mask_tex, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 					    VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -20781,7 +20859,7 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 		// bump the generation only when something actually changed (or the
 		// source flipped explicit -> auto).
 		bool wish_dirty = c->zone_frame_wish_last != NULL || c->zone_wish_rect_count != zone_rect_count ||
-		                  c->zone_wish_w != region_w || c->zone_wish_h != region_h;
+		                  c->zone_wish_w != view_w || c->zone_wish_h != region_h;
 		for (uint32_t i = 0; !wish_dirty && i < zone_rect_count; i++) {
 			if (memcmp(&c->zone_wish_rects[i], &zone_rects[i], sizeof(zone_rects[i])) != 0) {
 				wish_dirty = true;
@@ -20793,8 +20871,9 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 			c->zone_wish_rect_count = zone_rect_count;
 			c->zone_publish_seq++;
 		}
+		// The wish is the window's: the first view_w columns of the raster, the same in every view.
 		c->zone_wish_view = c->implicit_mask_view;
-		c->zone_wish_w = region_w;
+		c->zone_wish_w = view_w;
 		c->zone_wish_h = region_h;
 	} else if (emask != NULL && emask->submitted && emask->staged_view != VK_NULL_HANDLE) {
 		mask_view = emask->staged_view; // already SHADER_READ from submit
@@ -20881,12 +20960,12 @@ vk_composite_local_2d(struct comp_vk_native_compositor *c,
 			// zone clippable at all: the leftover is a ring, not a box.
 			VkRect2D best = {{0, 0}, {0, 0}};
 			uint64_t best_area = 0;
-			for (uint32_t i = 0; i < zone_rect_count; i++) {
-				const int32_t f = (int32_t)zone_feathers[i];
-				int32_t sx0 = zone_rects[i].offset.w + f;
-				int32_t sy0 = zone_rects[i].offset.h + f;
-				int32_t sx1 = zone_rects[i].offset.w + zone_rects[i].extent.w - f;
-				int32_t sy1 = zone_rects[i].offset.h + zone_rects[i].extent.h - f;
+			for (uint32_t i = 0; i < mask_zone_count; i++) {
+				const int32_t f = (int32_t)mask_zone_feathers[i];
+				int32_t sx0 = mask_zone_rects[i].offset.w + f;
+				int32_t sy0 = mask_zone_rects[i].offset.h + f;
+				int32_t sx1 = mask_zone_rects[i].offset.w + mask_zone_rects[i].extent.w - f;
+				int32_t sy1 = mask_zone_rects[i].offset.h + mask_zone_rects[i].extent.h - f;
 				if (sx0 < 0) sx0 = 0;
 				if (sy0 < 0) sy0 = 0;
 				if (sx1 > (int32_t)region_w) sx1 = (int32_t)region_w;

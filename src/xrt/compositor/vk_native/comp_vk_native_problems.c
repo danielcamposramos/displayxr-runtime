@@ -22,6 +22,7 @@
 
 #define PACKAGE "displayxr-runtime"
 #define KEY "declare"
+#define KEY_LAYOUT "layout"
 
 typedef int (*keep_fn)(int, const char *, const char *, const char *, const char *const *, int, const char *);
 typedef int (*clear_fn)(int, const char *, const char *);
@@ -158,12 +159,57 @@ comp_vk_native_problems_declare(enum comp_vk_native_declare_problem kind, const 
 	pthread_mutex_unlock(&lock);
 }
 
+void
+comp_vk_native_problems_layout(bool unsupported, const char *detail)
+{
+	pthread_mutex_lock(&lock);
+	if (!unsupported) {
+		if (engine_open(true) && clear(SSP_PERSON, PACKAGE, KEY_LAYOUT) != 0) {
+			U_LOG_E("sparky-stereo-problems: the layout is laid in both pictures but the earlier problem could "
+			        "not be ended: %s",
+			        error_en());
+		}
+		pthread_mutex_unlock(&lock);
+		return;
+	}
+	if (!engine_open(false)) {
+		pthread_mutex_unlock(&lock);
+		return;
+	}
+	char text[1024];
+	char escaped[2048];
+	char details[3200];
+	snprintf(text, sizeof text,
+	         "DisplayXR cannot lay this program's 2D content in both pictures of its 3D window, so the 2D content "
+	         "can be missing or out of place in one of them. Use a version of the program that places its 2D "
+	         "content as ordinary rectangles over the 3D. DisplayXR says: %s",
+	         detail != NULL ? detail : "");
+	if (!json_string(escaped, sizeof escaped, text) ||
+	    snprintf(details, sizeof details, "{\"text_en\":\"%s\"}", escaped) >= (int)sizeof details) {
+		U_LOG_E("sparky-stereo-problems: the problem text does not fit");
+		pthread_mutex_unlock(&lock);
+		return;
+	}
+	const char *args[1] = {detail != NULL ? detail : ""};
+	if (keep(SSP_PERSON, PACKAGE, KEY_LAYOUT, "LOCAL6", args, 1, details) != 0) {
+		U_LOG_E("sparky-stereo-problems: the problem could not be kept: %s", error_en());
+	}
+	pthread_mutex_unlock(&lock);
+}
+
 #else // !DXR_SPARKY_PROBLEMS
 
 void
 comp_vk_native_problems_declare(enum comp_vk_native_declare_problem kind, const char *detail)
 {
 	(void)kind;
+	(void)detail;
+}
+
+void
+comp_vk_native_problems_layout(bool unsupported, const char *detail)
+{
+	(void)unsupported;
 	(void)detail;
 }
 

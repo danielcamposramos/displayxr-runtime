@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -50,6 +52,15 @@ enum comp_vk_native_declare_problem
  */
 void
 comp_vk_native_problems_declare(enum comp_vk_native_declare_problem kind, const char *detail);
+
+/*!
+ * Keeps the problem that a layout of the program's 2D content cannot be laid in both pictures of a window declared
+ * full side by side (the person's problem, key "layout"; kept again it keeps its first time), or, with
+ * @p unsupported false, ends it. @p detail is the runtime's own English sentence. Called when the answer changes,
+ * never per frame.
+ */
+void
+comp_vk_native_problems_layout(bool unsupported, const char *detail);
 
 #ifdef __cplusplus
 }
