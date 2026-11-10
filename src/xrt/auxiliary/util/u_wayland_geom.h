@@ -499,6 +499,26 @@ u_wl_placement_quantum(double scale, double tol, uint32_t *out_q)
 }
 
 /*!
+ * Does a target that holds @p views_across views side by side for each window
+ * width take part in the panel rules (the weave is only correct where the lens
+ * is, #1595 and #1654)?
+ *
+ * A window declared full side by side to a stereo compositor (views_across 2)
+ * is not woven: the display processor writes the two views as separate complete
+ * pictures, the compositor scales each over the window and its own outputs make
+ * the screen's format. There is no lens phase to keep and no panel to stay on,
+ * and the target is views_across windows wide, so its extent is not a window
+ * rectangle on any screen. Every panel rule is skipped for it.
+ *
+ * @ingroup aux_util
+ */
+static inline bool
+u_wl_target_follows_panel_rules(uint32_t views_across)
+{
+	return views_across <= 1;
+}
+
+/*!
  * The part of a window that is NOT on the 3D panel, as up to four bands
  * (#1654).
  *

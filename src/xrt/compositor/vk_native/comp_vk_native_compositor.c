@@ -4299,6 +4299,11 @@ vk_composite_offpanel_2d(struct comp_vk_native_compositor *c,
 	if (enabled == 0 || !c->use_wayland || cmd == VK_NULL_HANDLE || target_image == VK_NULL_HANDLE) {
 		return;
 	}
+	// A declared full side by side target is views_across windows wide: its extent is not a window rectangle on
+	// the panel, and nothing in it is woven, so there is no off-panel band to paint flat.
+	if (!u_wl_target_follows_panel_rules(vk_output_views_across(c))) {
+		return;
+	}
 	// Where the window is, and how big the panel is. Both from the same
 	// metrics read the present origin uses, so the bands and the weave phase
 	// can never disagree.
@@ -5735,7 +5740,10 @@ vk_linux_update_surface_not_1to1(struct comp_vk_native_compositor *c)
 	// one (XRT_DP_SCANOUT_FLAG_TOLERATES_RESAMPLE) is not degraded by them.
 	// (a) stays: off the panel, native Wayland has no segment to weave into.
 	const bool tolerant = c->display_processor != NULL && c->dp_tolerates_resample;
-	const bool not_1to1 = !on_panel || (!tolerant && (!fits_window || !fits_surface));
+	// A window declared full side by side to a stereo compositor is not woven, so none of this applies: the
+	// compositor scales each view over the window and its outputs make the screen's format.
+	const bool not_1to1 = u_wl_target_follows_panel_rules(vk_output_views_across(c)) &&
+	                      (!on_panel || (!tolerant && (!fits_window || !fits_surface)));
 
 	if (not_1to1 == c->linux_surface_not_1to1) {
 		return;

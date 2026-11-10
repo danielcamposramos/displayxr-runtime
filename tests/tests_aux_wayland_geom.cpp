@@ -721,3 +721,20 @@ TEST_CASE("an unknown panel or window produces no bands, never a full-window one
 	REQUIRE(u_wl_offpanel_bands(0, 0, 0, 0, 1280, 720, b) == 0);
 	REQUIRE(u_wl_offpanel_bands(0, 0, kPanelModeW, kPanelModeH, 0, 0, b) == 0);
 }
+
+TEST_CASE("a full side by side target takes no part in the panel rules")
+{
+	// One view per window width (a plain woven window): the panel rules apply.
+	REQUIRE(u_wl_target_follows_panel_rules(1));
+	// A window declared full side by side to a stereo compositor is two windows wide and not woven.
+	REQUIRE_FALSE(u_wl_target_follows_panel_rules(2));
+
+	// The case that showed it: an 800 px window at x 560 on a 1920 px panel. Its declared target is 1600 px
+	// wide, so measured as a window it ends at 2160 and 240 px of the right view would be painted flat.
+	struct u_wl_rect_px b[4] = {};
+	REQUIRE(u_wl_offpanel_bands(560, 344, 1920, 1080, 1600, 450, b) == 1);
+	REQUIRE(b[0].x == 1360);
+	REQUIRE(b[0].w == 240);
+	// Measured as the window it is (one view wide, what the compositor shows), it is entirely on the panel.
+	REQUIRE(u_wl_offpanel_bands(560, 344, 1920, 1080, 800, 450, b) == 0);
+}
