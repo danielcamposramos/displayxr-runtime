@@ -24,6 +24,7 @@
 #include "target_input_plugin_loader.h"
 #include "target_plugin_loader.h"
 #include "target_rig_composer.h"
+#include "target_rdp_head.h"
 
 #ifdef XRT_BUILD_DRIVER_QWERTY
 #include "qwerty/qwerty_device.h"
@@ -85,6 +86,7 @@ struct sim_display_builder
 
 	//! The rig composer bound as the head's pose source, or NULL.
 	struct xrt_device *rig_composer;
+	struct xrt_device *rdp_head;
 };
 
 static xrt_result_t
@@ -263,6 +265,18 @@ sim_display_open_system_impl(struct xrt_builder *xb,
 		}
 	}
 
+    const char *rdp_mode = getenv("STEREODROIDVR");
+    if (rdp_mode && strcmp(rdp_mode, "1") == 0) {
+        struct sim_display_builder *sdb = (struct sim_display_builder *)xb;
+        if (!plugin || plugin->struct_size < offsetof(struct xrt_plugin_iface, set_pose_source) + sizeof(plugin->set_pose_source) || !plugin->set_pose_source)
+            return XRT_ERROR_DEVICE_CREATION_FAILED;
+        sdb->rdp_head = t_rdp_head_create();
+        if (!sdb->rdp_head) {
+            U_LOG_E("StereoDroidVR: cannot open the local paired pose boundary");
+            return XRT_ERROR_DEVICE_CREATION_FAILED;
+        }
+        plugin->set_pose_source(target_plugin_get_active_instance(), head, sdb->rdp_head);
+    }
 	return XRT_SUCCESS;
 }
 
@@ -275,6 +289,7 @@ sim_display_destroy(struct xrt_builder *xb)
 	// nothing polls the composer any more and there is no pose-source
 	// binding left to clear.
 	t_rig_composer_destroy(&sdb->rig_composer);
+    if (sdb->rdp_head) xrt_device_destroy(&sdb->rdp_head);
 
 	free(xb);
 }

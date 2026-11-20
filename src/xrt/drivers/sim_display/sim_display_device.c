@@ -355,15 +355,8 @@ sim_display_hmd_get_tracked_pose(struct xrt_device *xdev,
 	// Eye offsets are NOT applied here — the Kooima block in oxr_session.c
 	// computes world-space eye positions from display-space data.
 	if (hmd->pose_source != NULL) {
-		struct xrt_space_relation src_rel;
-		hmd->pose_source->get_tracked_pose(hmd->pose_source, name, at_timestamp_ns, &src_rel);
-
-		out_relation->pose = src_rel.pose;
-		out_relation->relation_flags = (enum xrt_space_relation_flags)(
-		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-		    XRT_SPACE_RELATION_POSITION_VALID_BIT);
-
-		return XRT_SUCCESS;
+        *out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
+        return hmd->pose_source->get_tracked_pose(hmd->pose_source, name, at_timestamp_ns, out_relation);
 	}
 
 	// Static pose: viewer at nominal position in front of the display.

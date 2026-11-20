@@ -67,7 +67,7 @@ endif()
 # xrCreateInstance time. The sim_display builder below is the in-tree
 # vendor-neutral fallback example.
 
-target_sources(target_lists PRIVATE target_builder_sim_display.c)
+target_sources(target_lists PRIVATE target_builder_sim_display.c target_rdp_head.c)
 target_link_libraries(target_lists PRIVATE drv_sim_display_includes)
 if(XRT_BUILD_DRIVER_QWERTY)
 	# sim_display builder uses qwerty_device.h for pose delegation config
