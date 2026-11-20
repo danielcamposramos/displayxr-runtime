@@ -46,6 +46,8 @@ if((WIN32 OR APPLE OR ANDROID OR (XRT_HAVE_LINUX AND XRT_HAVE_XCB)) AND XRT_HAVE
 	add_library(
 		comp_vk_native STATIC
 		${VK_NATIVE_SHADER_HEADERS}
+		comp_vk_native_problems.c
+		comp_vk_native_problems.h
 		comp_vk_native_alpha_probe.c
 		comp_vk_native_alpha_probe.h
 		comp_vk_native_compositor.c
@@ -89,6 +91,22 @@ if((WIN32 OR APPLE OR ANDROID OR (XRT_HAVE_LINUX AND XRT_HAVE_XCB)) AND XRT_HAVE
 			# scanout adapter, as the in-process D3D11 compositor does.
 			target_link_libraries(comp_vk_native PRIVATE comp_d3d11_segs)
 		endif()
+	endif()
+
+	# A distribution's place for failures (Sparky Stereo OS: sparky-stereo-problems). With the option the reason the
+	# window is not declared reaches the person through it; the library is opened at run time, so nothing is linked.
+	# A configure that asks for it and does not find it fails: nothing is dropped silently.
+	if(DXR_SPARKY_PROBLEMS)
+		find_package(PkgConfig REQUIRED)
+		pkg_check_modules(DXR_SSP REQUIRED sparky-stereo-problems)
+		pkg_get_variable(DXR_SSP_LIBDIR sparky-stereo-problems libdir)
+		target_compile_definitions(
+			comp_vk_native
+			PRIVATE DXR_SPARKY_PROBLEMS
+				"DXR_SPARKY_PROBLEMS_LIBRARY=\"${DXR_SSP_LIBDIR}/libsparky-stereo-problems.so.0\""
+			)
+		target_include_directories(comp_vk_native PRIVATE ${DXR_SSP_INCLUDE_DIRS})
+		target_link_libraries(comp_vk_native PRIVATE ${CMAKE_DL_LIBS})
 	endif()
 
 	target_link_libraries(

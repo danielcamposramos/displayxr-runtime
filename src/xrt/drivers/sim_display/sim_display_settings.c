@@ -46,12 +46,21 @@ static const struct knob g_knobs[] = {
     {{"TRACKING_SWAY_PERIOD_MS", XRT_COMPONENT_SETTING_TYPE_INT, "4000", "fake tracking: sway period (>= 100)"},
      "FAKE_TRACKING_SWAY_PERIOD_MS"},
     // Panel geometry + output.
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+    {{"OUTPUT", XRT_COMPONENT_SETTING_TYPE_ENUM, "sbs_full",
+      "initial output mode: sbs_full|full_sbs (declared to a stereo desktop compositor), 2d|passthrough"},
+     "OUTPUT"},
+    {{"FORCE_MODE", XRT_COMPONENT_SETTING_TYPE_INT, "-1",
+      "pin the rendering mode index (0=2D 1=Full SBS) for every app; -1 = off"},
+     "FORCE_MODE"},
+#else
     {{"OUTPUT", XRT_COMPONENT_SETTING_TYPE_ENUM, "anaglyph",
       "initial output mode: 2d|passthrough, anaglyph, sbs, squeezed|squeezed_sbs, quad, interlaced, blend"},
      "OUTPUT"},
     {{"FORCE_MODE", XRT_COMPONENT_SETTING_TYPE_INT, "-1",
       "pin the rendering mode index (0=2D 1=Anaglyph 2=Cropped SBS 3=Squeezed SBS 4=Quad) for every app; -1 = off"},
      "FORCE_MODE"},
+#endif
     {{"WIDTH_M", XRT_COMPONENT_SETTING_TYPE_FLOAT, "0.344", "panel width in metres"}, "WIDTH_M"},
     {{"HEIGHT_M", XRT_COMPONENT_SETTING_TYPE_FLOAT, "0.194", "panel height in metres"}, "HEIGHT_M"},
     {{"NOMINAL_Z_M", XRT_COMPONENT_SETTING_TYPE_FLOAT, "0.60", "nominal viewer distance in metres"}, "NOMINAL_Z_M"},

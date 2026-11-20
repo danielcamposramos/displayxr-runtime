@@ -814,12 +814,22 @@ sim_display_processor_gl_create_bound(enum sim_display_output_mode mode,
 	}
 
 	// Compile all shader programs for instant runtime switching
+#ifdef SIM_DISPLAY_FULL_SBS_ONLY
+	// Only 2D and the full side-by-side kernel are built (XRT_SIM_DISPLAY_FULL_SBS_ONLY).
+	const char *fs_sources[SIM_DP_PIPELINE_COUNT] = {NULL, NULL,           NULL, FS_SQUEEZED_SBS,
+	                                                 NULL, FS_PASSTHROUGH, NULL};
+#else
 	const char *fs_sources[SIM_DP_PIPELINE_COUNT] = {FS_SBS,  FS_ANAGLYPH,    FS_BLEND, FS_SQUEEZED_SBS,
 	                                                 FS_QUAD, FS_PASSTHROUGH, FS_INTERLACED};
+#endif
 	const char *mode_names[SIM_DP_PIPELINE_COUNT] = {"SBS",  "Anaglyph",    "Blend", "Squeezed SBS",
 	                                                 "Quad", "Passthrough", "Interlaced"};
 
 	for (int i = 0; i < SIM_DP_PIPELINE_COUNT; i++) {
+		if (fs_sources[i] == NULL) {
+			sdp->programs[i] = 0;
+			continue;
+		}
 		sdp->programs[i] = create_program(VS_FULLSCREEN, fs_sources[i]);
 		if (sdp->programs[i] == 0) {
 			U_LOG_E("sim_display GL: failed to create %s program", mode_names[i]);

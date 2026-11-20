@@ -63,6 +63,11 @@ if(WIN32)
 	set(_default_absolute OFF)
 endif()
 option(
+	DXR_SPARKY_PROBLEMS
+	"Tell the person through sparky-stereo-problems when the runtime cannot declare its window to the desktop (Sparky Stereo OS)"
+	OFF
+	)
+option(
 	XRT_OPENXR_INSTALL_ABSOLUTE_RUNTIME_PATH
 	"Use the absolute path to the runtime in the installed manifest, rather than a bare filename."
 	OFF

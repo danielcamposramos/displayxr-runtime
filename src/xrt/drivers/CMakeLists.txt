@@ -126,6 +126,26 @@ set(SIM_DISPLAY_SOURCES
 	${SIM_WEBCAM_CORE_SOURCES}
 	)
 
+# A build for a stereo desktop compositor: sim_display offers 2D and its full
+# side-by-side output only (SIM_DISPLAY_OUTPUT=sbs_full, declared to the
+# compositor), and the compositor's outputs make every display format from that
+# one picture. The other outputs (anaglyph, cropped and squeezed SBS, quad,
+# blend, interlaced) are not built.
+option(XRT_SIM_DISPLAY_FULL_SBS_ONLY "Build sim_display with its 2D and full side-by-side outputs only" OFF)
+if(XRT_SIM_DISPLAY_FULL_SBS_ONLY)
+	set(SIM_DISPLAY_FRAG_SHADERS sim_display/shaders/squeezed_sbs.frag sim_display/shaders/passthrough.frag)
+else()
+	set(SIM_DISPLAY_FRAG_SHADERS
+		sim_display/shaders/anaglyph.frag
+		sim_display/shaders/blend.frag
+		sim_display/shaders/sbs.frag
+		sim_display/shaders/squeezed_sbs.frag
+		sim_display/shaders/quad.frag
+		sim_display/shaders/passthrough.frag
+		sim_display/shaders/interlaced.frag
+		)
+endif()
+
 # Vulkan display processor (anaglyph/blend shaders)
 if(XRT_HAVE_VULKAN)
 	spirv_shaders(
@@ -134,13 +154,7 @@ if(XRT_HAVE_VULKAN)
 		1.0
 		SOURCES
 		sim_display/shaders/fullscreen.vert
-		sim_display/shaders/anaglyph.frag
-		sim_display/shaders/blend.frag
-		sim_display/shaders/sbs.frag
-		sim_display/shaders/squeezed_sbs.frag
-		sim_display/shaders/quad.frag
-		sim_display/shaders/passthrough.frag
-		sim_display/shaders/interlaced.frag
+		${SIM_DISPLAY_FRAG_SHADERS}
 		)
 	list(APPEND SIM_DISPLAY_SOURCES
 		${SIM_DISPLAY_SHADER_HEADERS}
@@ -191,6 +205,9 @@ add_library(drv_sim_display STATIC ${SIM_DISPLAY_SOURCES})
 # NOT ANDROID AND XRT_HAVE_OPENGL above) — keep this link in lockstep so a
 # headless Linux build without GL doesn't drag in GL/GLES aux.
 target_link_libraries(drv_sim_display PRIVATE xrt-interfaces aux_util aux_os aux_os_uvc PUBLIC drv_includes)
+if(XRT_SIM_DISPLAY_FULL_SBS_ONLY)
+	target_compile_definitions(drv_sim_display PRIVATE SIM_DISPLAY_FULL_SBS_ONLY)
+endif()
 if(NOT ANDROID AND XRT_HAVE_OPENGL)
 	target_link_libraries(drv_sim_display PRIVATE aux_ogl)
 endif()
@@ -258,6 +275,9 @@ list(APPEND ENABLED_DRIVERS drv_sim_display)
 # resolves because it's evaluated at generate time, when the target exists).
 if(XRT_FEATURE_OPENXR)
 add_library(drv_sim_display_plugin SHARED ${SIM_DISPLAY_SOURCES} sim_display/sim_display_plugin.c)
+if(XRT_SIM_DISPLAY_FULL_SBS_ONLY)
+	target_compile_definitions(drv_sim_display_plugin PRIVATE SIM_DISPLAY_FULL_SBS_ONLY)
+endif()
 if(ANDROID OR XRT_HAVE_LINUX)
 	# Self-contained plug-in model: a .so that STATIC-links aux and does NOT
 	# link the runtime .so. The ADR-019 Option-C aux-export boundary (the else
